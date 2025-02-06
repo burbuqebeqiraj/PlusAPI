@@ -7,6 +7,10 @@ PlusAPI.csproj
 PlusAPI.http
 PlusAPI.sln
 
+# Ignore EF Core Migrations
+/migrations/
+
+
 # Ignore development-specific settings
 appsettings.Development.json
 # dotenv files
