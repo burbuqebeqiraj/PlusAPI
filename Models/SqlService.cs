@@ -14,12 +14,12 @@ namespace PlusApi.Models
             _entity = db.Set<T>() ?? throw new InvalidOperationException("DbSet cannot be null.");
         }
 
-        public List<T> SelectAll()
+        public async Task<List<T>> SelectAllAsync()
         {
-            return _entity.ToList();
+            return await _entity.ToListAsync(); 
         }
 
-        public virtual List<T> SelectAllByClause(
+        public async Task<List<T>> SelectAllByClauseAsync(
             Expression<Func<T, bool>>? filter = null,
             Func<IQueryable<T>, IOrderedQueryable<T>>? orderBy = null,
             string? includeProperties = null)
@@ -37,40 +37,40 @@ namespace PlusApi.Models
                         .Aggregate(query, (current, includeProperty) => current.Include(includeProperty));
             }
 
-            return orderBy != null ? orderBy(query).ToList() : query.ToList();
+            return orderBy != null ? await orderBy(query).ToListAsync() : await query.ToListAsync(); // Asynchronous fetch
         }
 
-        public T? SelectById(object id)
+        public async Task<T?> SelectByIdAsync(object id)
         {
-            return _entity.Find(id);
+            return await _entity.FindAsync(id); 
         }
 
-        public T? SelectSingle()
+        public async Task<T?> SelectSingleAsync()
         {
-            return _entity.SingleOrDefault();
+            return await _entity.SingleOrDefaultAsync();
         }
 
-        public T Insert(T obj)
+        public async Task<T> InsertAsync(T obj)
         {
             _entity.Add(obj);
-            _db.SaveChanges();
+            await _db.SaveChangesAsync(); 
             return obj;
         }
 
-        public T Update(T obj)
+        public async Task<T> UpdateAsync(T obj)
         {
             _db.Entry(obj).State = EntityState.Modified;
-            _db.SaveChanges();
+            await _db.SaveChangesAsync(); 
             return obj;
         }
 
-        public T? Delete(object id)
+        public async Task<T?> DeleteAsync(object id)
         {
-            var existing = _entity.Find(id);
+            var existing = await _entity.FindAsync(id); 
             if (existing != null)
             {
                 _entity.Remove(existing);
-                _db.SaveChanges();
+                await _db.SaveChangesAsync(); 
             }
             return existing;
         }
