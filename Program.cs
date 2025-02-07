@@ -8,10 +8,15 @@ builder.Services.AddControllers(); // Enables MVC-style controllers
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Get connection string from app settings
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
+// Register DbContext with SQL Server
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));
+
+// Register SqlService<T> with Dependency Injection (DI)
+builder.Services.AddScoped(typeof(ISqlService<>), typeof(SqlService<>));
 
 var app = builder.Build();
 
@@ -27,9 +32,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
 app.UseAuthorization(); // Required if using authentication and authorization
-
 app.MapControllers(); // Maps controllers instead of Minimal API
 
 app.Run();
