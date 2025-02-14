@@ -13,7 +13,7 @@ namespace PlusApi.Models.User{
 		[StringLength(100)]
 		public required string Email { get; set; }
 		[StringLength(100)]
-		public required string Password { get; set; }
+		public string? Password { get; set; }
 		public string? Address {get; set;}
         public bool IsActive { get; set; }	
 		[DefaultValue(0)] 

@@ -24,8 +24,14 @@ namespace PlusApi.Models
         // Override OnModelCreating to add seed data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<Users>()
+                .HasOne<UserRole>()
+                .WithMany()           
+                .HasForeignKey(user => user.UserRoleId) 
+                .OnDelete(DeleteBehavior.Restrict);
+
             base.OnModelCreating(modelBuilder);
-            modelBuilder.Seed(); // Make sure this is correctly added to your ModelBuilderExtensions
+            modelBuilder.Seed();
         }
     }
 }
