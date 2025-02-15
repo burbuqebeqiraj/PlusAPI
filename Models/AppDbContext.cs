@@ -8,6 +8,7 @@ namespace PlusApi.Models
     {
         public DbSet<UserRole> UserRoles { get; set; }
         public DbSet<Users> Users { get; set; }
+        public DbSet<LogHistory> LogHistories { get; set; }
 
         // Constructor to pass options to the base DbContext class
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
@@ -28,6 +29,12 @@ namespace PlusApi.Models
                 .HasOne<UserRole>()
                 .WithMany()           
                 .HasForeignKey(user => user.UserRoleId) 
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<LogHistory>()
+                .HasOne<Users>()
+                .WithMany()           
+                .HasForeignKey(user => user.UserId) 
                 .OnDelete(DeleteBehavior.Restrict);
 
             base.OnModelCreating(modelBuilder);

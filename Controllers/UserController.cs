@@ -22,19 +22,22 @@ namespace PlusApi.Controllers
         private readonly ISqlService<UserRole> _userRoleRepo;        
         private readonly ISqlService<Users> _userRepo;
         private readonly IPasswordHasher<Users> _passwordHasher;
+        private readonly ISqlService<LogHistory> _logHistoryRepo;
 
         // Constructor
         public UserController(IConfiguration config,
                               AppDbContext context,
                               ISqlService<Users> userRepo,
                               ISqlService<UserRole> userRoleRepo,
-                              IPasswordHasher<Users> passwordHasher)
+                              IPasswordHasher<Users> passwordHasher,
+                              ISqlService<LogHistory> logHistoryRepo)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
             _context = context ?? throw new ArgumentNullException(nameof(context));
             _userRoleRepo = userRoleRepo ?? throw new ArgumentNullException(nameof(userRoleRepo));
             _userRepo = userRepo ?? throw new ArgumentNullException(nameof(userRepo));
             _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
+            _logHistoryRepo = logHistoryRepo ?? throw new ArgumentNullException(nameof(logHistoryRepo));
         }
 
         //Create new user role
@@ -424,51 +427,50 @@ namespace PlusApi.Controllers
         ///Get Log in Detail
         ///</summary>
         [AllowAnonymous]
-        [HttpGet("{email}/{password}")]
-        public async Task<ActionResult> GetLoginInfo(string email, string password)
+        [HttpPost("login")]
+        public async Task<IActionResult> GetLoginInfo(Users loginRequest)
         {
             try
             {
-                var user = await (from u in _context.Users
-                                join r in _context.UserRoles on u.UserRoleId equals r.UserRoleId
-                                where u.IsActive && u.Email == email
-                                select new
-                                {
-                                    u.UserId,
-                                    r.UserRoleId,
-                                    r.RoleName,
-                                    r.DisplayName,
-                                    u.FullName,
-                                    u.Mobile,
-                                    u.Email,
-                                    u.Address,
-                                    u.AddedBy
-                                }).FirstOrDefaultAsync();
-
-                if (user == null)
+                if (string.IsNullOrEmpty(loginRequest.Email) || string.IsNullOrEmpty(loginRequest.Password))
                 {
-                    return NotFound(new { Status = "error", ResponseMsg = "User not found." });
+                    return BadRequest(new { Status = "error", ResponseMsg = "Invalid request data." });
                 }
 
-                // Verify password
-                var userEntity = await _context.Users.SingleOrDefaultAsync(u => u.Email == email);
-                if (userEntity == null || _passwordHasher.VerifyHashedPassword(userEntity, userEntity.Password, password) != PasswordVerificationResult.Success)
+                var userEntity = await _context.Users
+                    .FirstOrDefaultAsync(u => u.IsActive && u.Email == loginRequest.Email);
+
+                if (userEntity == null || userEntity.IsLockedOut)
                 {
+                    return Unauthorized(new { Status = "error", ResponseMsg = "Invalid credentials or account locked." });
+                }
+
+                if (_passwordHasher.VerifyHashedPassword(userEntity, userEntity.Password, loginRequest.Password) != PasswordVerificationResult.Success)
+                {
+                    await RegisterFailedAttempt(userEntity);
                     return Unauthorized(new { Status = "error", ResponseMsg = "Invalid credentials." });
                 }
 
-                // Map user data
+                // Reset failed attempts
+                userEntity.FailedLoginAttempts = 0;
+                userEntity.IsLockedOut = false;
+                _context.Users.Update(userEntity);
+                await _context.SaveChangesAsync();
+
+                var userRole = await _context.UserRoles.FirstOrDefaultAsync(r => r.UserRoleId == userEntity.UserRoleId);
+                if (userRole == null)
+                {
+                    return Unauthorized(new { Status = "error", ResponseMsg = "User role not found." });
+                }
+
                 var userInfo = new UserInfo
                 {
-                    UserId = user.UserId,
-                    UserRoleId = user.UserRoleId,
-                    RoleName = user.RoleName,
-                    DisplayName = user.DisplayName,
-                    Email = user.Email,
-                    FullName = user.FullName,
-                    Mobile = user.Mobile,
-                    Address = user.Address,
-                    AddedBy = user.AddedBy
+                    UserId = userEntity.UserId,
+                    UserRoleId = userEntity.UserRoleId,
+                    RoleName = userRole.RoleName,
+                    DisplayName = userRole.DisplayName,
+                    Email = userEntity.Email,
+                    FullName = userEntity.FullName,
                 };
 
                 // Generate JWT token
@@ -482,15 +484,15 @@ namespace PlusApi.Controllers
             }
         }
 
-        string GenerateJwtToken(UserInfo userInfo)
+        private string GenerateJwtToken(UserInfo userInfo)
         {
-            var securityKey=new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:SecretKey"]));
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:SecretKey"]));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
             var claims = new[]
             {
                 new Claim(JwtRegisteredClaimNames.Sub, userInfo.UserId.ToString()),
-                new Claim("fullName", userInfo.FullName.ToString()),
-                new Claim("role", userInfo.RoleName),
+                new Claim("fullName", userInfo.FullName),  
+                new Claim("role", userInfo.RoleName),     
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             };
 
@@ -502,6 +504,104 @@ namespace PlusApi.Controllers
                 signingCredentials: credentials
             );
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private async Task RegisterFailedAttempt(Users user)
+        {
+            user.FailedLoginAttempts++;
+
+            if (user.FailedLoginAttempts >= 5)
+            {
+                user.IsLockedOut = true;
+                user.LockoutEndTime = DateTime.UtcNow.AddMinutes(15);
+            }
+
+            _context.Users.Update(user);
+            await _context.SaveChangesAsync();
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost]
+        public async Task<ActionResult> CreateLoginHistory(LogHistory model)
+        {
+            try
+            {
+                model.LogDate = DateTime.UtcNow; 
+                model.LogInTime = DateTime.UtcNow;
+                model.LogCode = Guid.NewGuid().ToString();
+
+                await _logHistoryRepo.InsertAsync(model);
+
+                return Ok(new { Status = "success", ResponseMsg = "Login History successfully created!" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Status = "error", ResponseMsg = "An error occurred.", Details = ex.Message });
+            }
+        }
+
+        [Authorize(Roles = "Admin, SuperAdmin")]
+        [HttpGet("{logCode}")]
+        public async Task<IActionResult> UpdateLoginHistory(string logCode)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(logCode))
+                {
+                    return BadRequest(new { Status = "error", ResponseMsg = "Log code cannot be empty" });
+                }
+
+                var objLogHistory = await _context.LogHistories
+                    .SingleOrDefaultAsync(opt => opt.LogCode == logCode);
+
+                if (objLogHistory == null)
+                {
+                    return NotFound(new { Status = "error", ResponseMsg = "Log entry not found" });
+                }
+
+                objLogHistory.LogOutTime = DateTime.UtcNow; 
+                await _context.SaveChangesAsync();
+
+                return Ok(new { Status = "success", ResponseMsg = "Successfully updated" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Status = "error", ResponseMsg = "An error occurred.", Details = ex.Message });
+            }
+        }
+
+        [Authorize(Roles = "SuperAdmin")]
+        [HttpGet]
+        public async Task<ActionResult> GetBrowseListAsync()
+        {
+            try
+            {
+                var browsingList = await _context.LogHistories
+                    .AsNoTracking()
+                    .Join(_context.Users.AsNoTracking(),
+                        log => log.UserId,
+                        user => user.UserId,
+                        (log, user) => new
+                        {
+                            log.UserId,
+                            log.LogCode,
+                            log.LogDate,
+                            log.LogInTime,
+                            log.LogOutTime,
+                            log.Ip,
+                            log.Browser,
+                            log.BrowserVersion,
+                            log.Platform
+                        })
+                    .OrderByDescending(e => e.LogInTime)
+                    .ToListAsync();
+
+                return Ok(browsingList);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Status = "error", ResponseMsg = "An error occurred.", Details = ex.Message });
+            }
         }
 
     }
