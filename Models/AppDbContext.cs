@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PlusApi.Models.Department;
 using PlusApi.Models.User;
 using PlusApi.ViewModels.Helper;
 
@@ -9,6 +10,7 @@ namespace PlusApi.Models
         public DbSet<UserRole> UserRoles { get; set; }
         public DbSet<Users> Users { get; set; }
         public DbSet<LogHistory> LogHistories { get; set; }
+        public DbSet<Departments> Departments { get; set; }
 
         // Constructor to pass options to the base DbContext class
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
